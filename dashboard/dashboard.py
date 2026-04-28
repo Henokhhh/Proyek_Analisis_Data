@@ -8,12 +8,14 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+# ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Air Quality Dashboard – Dongsi vs Dingling",
     page_icon="🌫️",
     layout="wide",
 )
 
+# ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
@@ -30,8 +32,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ── Colour palette ────────────────────────────────────────────────────────────
 PALETTE = {"Dongsi": "#C0392B", "Dingling": "#2E86C1"}
 
+# ── Data loader ───────────────────────────────────────────────────────────────
+# Direktori tempat dashboard.py berada
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @st.cache_data
@@ -55,7 +60,7 @@ def load_data(filepath: str) -> pd.DataFrame:
 
     # Forward-fill wind direction
     if "wd" in df.columns:
-        df["wd"].fillna(method="ffill", inplace=True)
+        df["wd"] = df["wd"].ffill()
 
     # Build datetime column
     df["datetime"] = pd.to_datetime(df[["year", "month", "day", "hour"]])
@@ -73,6 +78,8 @@ def load_data(filepath: str) -> pd.DataFrame:
     df["season"] = df["month"].apply(season)
     return df
 
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.image(
         "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Flag_of_the_People%27s_Republic_of_China.svg/320px-Flag_of_the_People%27s_Republic_of_China.svg.png",
@@ -101,6 +108,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Proyek Analisis Data – Air Quality Dataset\n\n**Henokh William Christianos Lase**")
 
+# ── Apply filters ─────────────────────────────────────────────────────────────
 df = df_raw[
     df_raw["station"].isin(selected_stations)
     & df_raw["year"].between(year_range[0], year_range[1])
@@ -110,12 +118,14 @@ if df.empty:
     st.warning("Tidak ada data untuk filter yang dipilih.")
     st.stop()
 
+# ── Header ────────────────────────────────────────────────────────────────────
 st.title("🌫️ Dashboard Kualitas Udara – Beijing")
 st.markdown(
     "Perbandingan **PM2.5** antara wilayah urban **Dongsi** dan pinggiran **Dingling** (2013–2017)"
 )
 st.markdown("---")
 
+# ── KPI row ───────────────────────────────────────────────────────────────────
 kpi_cols = st.columns(len(selected_stations) * 2)
 col_idx = 0
 for station in selected_stations:
@@ -138,10 +148,14 @@ for station in selected_stations:
 
 st.markdown("---")
 
+# ── Tab layout ────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4 = st.tabs(
     ["📈 Tren Bulanan", "🌸 Pola Musiman", "🔬 EDA & Korelasi", "📊 Analisis RFM"]
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 1 – Monthly trend
+# ─────────────────────────────────────────────────────────────────────────────
 with tab1:
     st.subheader("Tren Rata-rata PM2.5 Bulanan")
     st.caption(
@@ -187,6 +201,9 @@ with tab1:
 """
         )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 2 – Seasonal pattern
+# ─────────────────────────────────────────────────────────────────────────────
 with tab2:
     st.subheader("Tingkat Polusi PM2.5 Berdasarkan Musim")
     st.caption(
@@ -245,6 +262,9 @@ with tab2:
 """
         )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 3 – EDA & Correlation
+# ─────────────────────────────────────────────────────────────────────────────
 with tab3:
     st.subheader("Eksplorasi Data & Korelasi Meteorologi")
 
@@ -283,6 +303,7 @@ with tab3:
         st.pyplot(fig5)
         plt.close()
 
+    # Correlation heatmap per station
     st.markdown("**Korelasi Antar Variabel Meteorologi**")
     corr_cols = ["PM2.5", "TEMP", "PRES", "DEWP", "WSPM"]
     avail_cols = [c for c in corr_cols if c in df.columns]
@@ -307,6 +328,7 @@ with tab3:
             st.pyplot(fig6)
             plt.close()
 
+    # Wind speed vs PM2.5 scatter
     st.markdown("**Kecepatan Angin (WSPM) vs PM2.5**")
     if "WSPM" in df.columns:
         fig7, ax7 = plt.subplots(figsize=(10, 4))
@@ -331,6 +353,9 @@ with tab3:
 """
         )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 4 – RFM Analysis
+# ─────────────────────────────────────────────────────────────────────────────
 with tab4:
     st.subheader("Analisis RFM – Karakteristik Polusi")
     st.caption(
@@ -398,6 +423,7 @@ with tab4:
 """
         )
 
+# ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.caption(
     "📘 Proyek Analisis Data – Air Quality Dataset | "
