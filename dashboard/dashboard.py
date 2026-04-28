@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import os
 import warnings
 
@@ -14,386 +15,206 @@ st.set_page_config(
     layout="wide",
 )
 
+PALETTE = {
+    "Dongsi": "#C0392B",   # merah
+    "Dingling": "#2E86C1", # biru
+}
+HEALTHY_LINE_COLOR = "#E67E22"  
+HEALTHY_LINE_DASH  = "dash"
+
+def hex_to_rgba(hex_val, opacity=0.1):
+    hex_val = hex_val.lstrip('#')
+    rgb = tuple(int(hex_val[i:i+2], 16) for i in range(0, 6, 2))
+    return f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, {opacity})"
+
 st.markdown(
-    """
+    f"""
     <style>
-    .metric-card {
-        background: #f8f9fa;
-        border-radius: 10px;
-        padding: 16px 20px;
-        border-left: 5px solid #C0392B;
-    }
-    .metric-card.blue { border-left-color: #2E86C1; }
-    h1 { color: #2C3E50; }
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap');
+    html, body, [class*="css"] {{ font-family: 'IBM Plex Sans', sans-serif; }}
+    .legend-banner {{ display: flex; gap: 24px; align-items: center; background: #f0f4f8; border-radius: 8px; padding: 10px 18px; margin-bottom: 12px; font-size: 0.85rem; }}
+    .legend-dot {{ width: 14px; height: 14px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }}
+    .legend-line {{ width: 28px; height: 3px; display: inline-block; margin-right: 6px; vertical-align: middle; border-top: 2.5px dashed {HEALTHY_LINE_COLOR}; }}
+    .kpi-card {{ background: white; border-radius: 10px; padding: 14px 18px; border-left: 5px solid #ccc; box-shadow: 0 1px 4px rgba(0,0,0,.07); margin-bottom: 8px; }}
+    .kpi-card.dongsi  {{ border-left-color: {PALETTE["Dongsi"]}; }}
+    .kpi-card.dingling {{ border-left-color: {PALETTE["Dingling"]}; }}
+    .kpi-label {{ font-size: .75rem; color: #6b7280; margin-bottom: 2px; }}
+    .kpi-value {{ font-size: 1.5rem; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }}
+    .kpi-sub   {{ font-size: .75rem; color: #9ca3af; }}
+    .rfm-badge {{ display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; letter-spacing: .03em; }}
+    .rfm-high   {{ background:#fde8e8; color:#b91c1c; }}
+    .rfm-medium {{ background:#fef3c7; color:#b45309; }}
+    .rfm-low    {{ background:#d1fae5; color:#065f46; }}
+    h1 {{ color: #1e293b; }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-PALETTE = {"Dongsi": "#C0392B", "Dingling": "#2E86C1"}
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+def render_legend_banner(stations):
+    dots = "".join(
+        f'<span><span class="legend-dot" style="background:{PALETTE.get(s, "#888")}"></span>'
+        f'<strong>{s}</strong></span>'
+        for s in stations
+    )
+    st.markdown(
+        f'<div class="legend-banner">🗺️ <strong>Legenda Warna:</strong> {dots} &nbsp;&nbsp; '
+        f'<span><span class="legend-line"></span>Batas Sehat WHO (75 µg/m³)</span></div>',
+        unsafe_allow_html=True,
+    )
 
 @st.cache_data
 def load_data(filepath: str) -> pd.DataFrame:
-    """Load and clean a single air-quality CSV file.
-    Path dicari relatif terhadap lokasi dashboard.py bukan terminal."""
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     if not os.path.isabs(filepath):
         filepath = os.path.join(BASE_DIR, filepath)
     if not os.path.exists(filepath):
         return pd.DataFrame()
 
     df = pd.read_csv(filepath)
-
-    if "No" in df.columns:
-        df.drop("No", axis=1, inplace=True)
-
+    if "No" in df.columns: df.drop("No", axis=1, inplace=True)
+    
     num_cols = df.select_dtypes(include=["float64", "int64"]).columns
     df[num_cols] = df[num_cols].interpolate(method="linear")
-
-    if "wd" in df.columns:
-        df["wd"] = df["wd"].ffill()
-
+    if "wd" in df.columns: df["wd"] = df["wd"].ffill()
+    
     df["datetime"] = pd.to_datetime(df[["year", "month", "day", "hour"]])
-
     def season(m):
-        if m in [12, 1, 2]:
-            return "Winter"
-        elif m in [3, 4, 5]:
-            return "Spring"
-        elif m in [6, 7, 8]:
-            return "Summer"
+        if m in [12, 1, 2]: return "Winter"
+        if m in [3, 4, 5]:  return "Spring"
+        if m in [6, 7, 8]:  return "Summer"
         return "Autumn"
-
     df["season"] = df["month"].apply(season)
     return df
 
 with st.sidebar:
-    st.image(
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Flag_of_the_People%27s_Republic_of_China.svg/320px-Flag_of_the_People%27s_Republic_of_China.svg.png",
-        width=80,
-    )
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Flag_of_the_People%27s_Republic_of_China.svg/320px-Flag_of_the_People%27s_Republic_of_China.svg.png", width=80)
     st.title("⚙️ Pengaturan")
-
     data_dir = st.text_input("Path File CSV", value="main_data.csv")
     df_raw = load_data(data_dir)
 
     if df_raw.empty:
-        st.error(
-            "❌ File tidak ditemukan.\n\n"
-            "Pastikan path mengarah ke file CSV yang benar.\n\n"
-            "Contoh: `main_data/main_data.csv`"
-        )
+        st.error("❌ File tidak ditemukan. Periksa path CSV Anda.")
         st.stop()
 
     stations = sorted(df_raw["station"].unique().tolist())
-    selected_stations = st.multiselect("Pilih Stasiun", stations, default=stations)
-
-    year_min = int(df_raw["year"].min())
-    year_max = int(df_raw["year"].max())
-    year_range = st.slider("Rentang Tahun", year_min, year_max, (year_min, year_max))
-
+    sel_stations = st.multiselect("Pilih Stasiun", stations, default=stations)
+    year_range = st.slider("Rentang Tahun", int(df_raw["year"].min()), int(df_raw["year"].max()), (int(df_raw["year"].min()), int(df_raw["year"].max())))
     st.markdown("---")
     st.caption("Proyek Analisis Data – Air Quality Dataset\n\n**Henokh William Christianos Lase**")
 
-df = df_raw[
-    df_raw["station"].isin(selected_stations)
-    & df_raw["year"].between(year_range[0], year_range[1])
-].copy()
-
+df = df_raw[df_raw["station"].isin(sel_stations) & df_raw["year"].between(year_range[0], year_range[1])].copy()
 if df.empty:
-    st.warning("Tidak ada data untuk filter yang dipilih.")
+    st.warning("Tidak ada data untuk filter tersebut.")
     st.stop()
 
 st.title("🌫️ Dashboard Kualitas Udara – Beijing")
-st.markdown(
-    "Perbandingan **PM2.5** antara wilayah urban **Dongsi** dan pinggiran **Dingling** (2013–2017)"
-)
+st.markdown("Perbandingan **PM2.5** antara wilayah urban **Dongsi** dan pinggiran **Dingling** (2013–2017)")
+render_legend_banner(sel_stations)
 st.markdown("---")
 
-kpi_cols = st.columns(len(selected_stations) * 2)
-col_idx = 0
-for station in selected_stations:
+kpi_cols = st.columns(len(sel_stations) * 2)
+for i, station in enumerate(sel_stations):
     subset = df[df["station"] == station]["PM2.5"]
-    color = "red" if station == "Dongsi" else "blue"
-    with kpi_cols[col_idx]:
-        st.metric(
-            label=f"📍 {station} – Rata-rata PM2.5",
-            value=f"{subset.mean():.1f} µg/m³",
-            delta=f"Max {subset.max():.0f} µg/m³",
-        )
-    col_idx += 1
-    with kpi_cols[col_idx]:
-        bad_pct = (subset > 75).mean() * 100
-        st.metric(
-            label=f"⚠️ {station} – % Hari Tidak Sehat (>75)",
-            value=f"{bad_pct:.1f}%",
-        )
-    col_idx += 1
+    css_cls = "dongsi" if station == "Dongsi" else "dingling"
+    bad_pct = (subset > 75).mean() * 100
+    
+    with kpi_cols[i*2]:
+        st.markdown(f'<div class="kpi-card {css_cls}"><div class="kpi-label">📍 {station} – Avg PM2.5</div>'
+                    f'<div class="kpi-value">{subset.mean():.1f} <small>µg/m³</small></div>'
+                    f'<div class="kpi-sub">Maks {subset.max():.0f} | Min {subset.min():.0f}</div></div>', unsafe_allow_html=True)
+    with kpi_cols[i*2+1]:
+        st.markdown(f'<div class="kpi-card {css_cls}"><div class="kpi-label">⚠️ % Jam Tidak Sehat</div>'
+                    f'<div class="kpi-value">{bad_pct:.1f}<small>%</small></div>'
+                    f'<div class="kpi-sub">{len(subset):,} jam pengamatan</div></div>', unsafe_allow_html=True)
 
 st.markdown("---")
-
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["📈 Tren Bulanan", "🌸 Pola Musiman", "🔬 EDA & Korelasi", "📊 Analisis RFM"]
-)
+tab1, tab2, tab3, tab4 = st.tabs(["📈 Tren Bulanan", "🌸 Pola Musiman", "🔬 EDA & Korelasi", "📊 Analisis RFM"])
 
 with tab1:
     st.subheader("Tren Rata-rata PM2.5 Bulanan")
-    st.caption(
-        "Pertanyaan 1: Bagaimana pola fluktuasi PM2.5 bulanan antara Dongsi (urban) dan Dingling (pinggiran)?"
-    )
-
-    trend_df = (
-        df.groupby(["year", "month", "station"])["PM2.5"].mean().reset_index()
-    )
-    trend_df["period"] = (
-        trend_df["year"].astype(str)
-        + "-"
-        + trend_df["month"].astype(str).str.zfill(2)
-    )
+    trend_df = df.groupby(["year", "month", "station"])["PM2.5"].mean().reset_index()
+    trend_df["period"] = pd.to_datetime(trend_df["year"].astype(str) + "-" + trend_df["month"].astype(str).str.zfill(2))
     trend_df.sort_values("period", inplace=True)
 
-    fig, ax = plt.subplots(figsize=(14, 5))
-    for station in selected_stations:
+    fig1 = go.Figure()
+    for station in sel_stations:
         sub = trend_df[trend_df["station"] == station]
-        ax.plot(sub["period"], sub["PM2.5"], label=station, color=PALETTE.get(station), linewidth=2)
-        ax.fill_between(sub["period"], sub["PM2.5"], alpha=0.1, color=PALETTE.get(station))
+        color = PALETTE.get(station, "#888")
+        fig1.add_trace(go.Scatter(
+            x=sub["period"], y=sub["PM2.5"],
+            name=station, mode="lines",
+            line=dict(color=color, width=2.5),
+            fill="tozeroy",
+            fillcolor=hex_to_rgba(color, 0.15), 
+            hovertemplate=f"<b>{station}</b><br>Periode: %{{x|%b %Y}}<br>PM2.5: <b>%{{y:.1f}} µg/m³</b><extra></extra>"
+        ))
 
-    ax.axhline(75, color="orange", linestyle="--", linewidth=1.2, label="Batas Sehat (75 µg/m³)")
-    step = max(1, len(trend_df["period"].unique()) // 8)
-    ticks = trend_df["period"].unique()[::step]
-    ax.set_xticks(ticks)
-    ax.set_xticklabels(ticks, rotation=45, ha="right")
-    ax.set_xlabel("Tahun-Bulan")
-    ax.set_ylabel("Rata-rata PM2.5 (µg/m³)")
-    ax.set_title("Tren Konsentrasi PM2.5 per Bulan")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close()
-
-    with st.expander("📌 Insight"):
-        st.markdown(
-            """
-- Terlihat pola fluktuasi tahunan yang konsisten – **puncak polusi di Desember–Februari**, terendah Juni–Agustus.
-- **Dongsi** (urban) secara konsisten lebih tinggi dari **Dingling** (pinggiran), tetapi keduanya bergerak searah.
-- Garis oranye menunjukkan batas sehat WHO – sering terlewati terutama di musim dingin.
-"""
-        )
+    fig1.add_hline(y=75, line_color=HEALTHY_LINE_COLOR, line_dash=HEALTHY_LINE_DASH, 
+                   annotation_text="Batas Sehat (75 µg/m³)", annotation_position="top left")
+    fig1.update_layout(xaxis_title="Tahun-Bulan", yaxis_title="µg/m³", hovermode="x unified", height=420, template="plotly_white")
+    st.plotly_chart(fig1, use_container_width=True)
 
 with tab2:
     st.subheader("Tingkat Polusi PM2.5 Berdasarkan Musim")
-    st.caption(
-        "Pertanyaan 2: Apakah musim berpengaruh terhadap PM2.5 di kedua wilayah?"
-    )
+    season_order = ["Spring", "Summer", "Autumn", "Winter"]
+    seasonal = df.groupby(["season", "station"])["PM2.5"].mean().reset_index()
+    seasonal["season"] = pd.Categorical(seasonal["season"], categories=season_order, ordered=True)
+    seasonal.sort_values("season", inplace=True)
 
     col_a, col_b = st.columns(2)
-
     with col_a:
-        fig2, ax2 = plt.subplots(figsize=(7, 5))
-        season_order = ["Spring", "Summer", "Autumn", "Winter"]
-        palette_list = [PALETTE.get(s, "#888") for s in selected_stations]
-        sns.barplot(
-            data=df[df["station"].isin(selected_stations)],
-            x="season",
-            y="PM2.5",
-            hue="station",
-            order=season_order,
-            palette={s: PALETTE.get(s, "#888") for s in selected_stations},
-            ax=ax2,
-        )
-        ax2.axhline(75, color="orange", linestyle="--", linewidth=1, label="Batas Sehat")
-        ax2.set_title("Rata-rata PM2.5 per Musim")
-        ax2.set_ylabel("PM2.5 (µg/m³)")
-        ax2.set_xlabel("Musim")
-        ax2.legend()
-        plt.tight_layout()
-        st.pyplot(fig2)
-        plt.close()
-
+        fig2 = px.bar(seasonal, x="season", y="PM2.5", color="station", color_discrete_map=PALETTE, barmode="group", title="Rata-rata PM2.5 per Musim")
+        fig2.add_hline(y=75, line_color=HEALTHY_LINE_COLOR, line_dash=HEALTHY_LINE_DASH)
+        st.plotly_chart(fig2, use_container_width=True)
     with col_b:
-        fig3, ax3 = plt.subplots(figsize=(7, 5))
-        df_pivot = (
-            df[df["station"].isin(selected_stations)]
-            .groupby(["season", "station"])["PM2.5"]
-            .mean()
-            .unstack()
-            .reindex(season_order)
-        )
-        df_pivot.plot(kind="line", marker="o", ax=ax3, color=[PALETTE.get(s, "#888") for s in df_pivot.columns])
-        ax3.axhline(75, color="orange", linestyle="--", linewidth=1, label="Batas Sehat")
-        ax3.set_title("Tren Musiman PM2.5")
-        ax3.set_ylabel("PM2.5 (µg/m³)")
-        ax3.set_xlabel("Musim")
-        ax3.legend()
-        plt.tight_layout()
-        st.pyplot(fig3)
-        plt.close()
-
-    with st.expander("📌 Insight"):
-        st.markdown(
-            """
-- **Musim Dingin (Winter)** → polusi tertinggi; diduga akibat pemanas & inversi suhu.
-- **Musim Panas (Summer)** → polusi terendah; curah hujan membantu pembersihan udara.
-- Polusi bersifat **regional** – bahkan Dingling (pinggiran) mengalami lonjakan tajam di winter.
-"""
-        )
+        fig3 = px.line(seasonal, x="season", y="PM2.5", color="station", color_discrete_map=PALETTE, markers=True, title="Tren Musiman PM2.5")
+        st.plotly_chart(fig3, use_container_width=True)
 
 with tab3:
     st.subheader("Eksplorasi Data & Korelasi Meteorologi")
-
     col_c, col_d = st.columns(2)
-
     with col_c:
-        st.markdown("**Distribusi PM2.5 per Stasiun**")
-        fig4, ax4 = plt.subplots(figsize=(6, 4))
-        for station in selected_stations:
-            sub = df[df["station"] == station]["PM2.5"].dropna()
-            ax4.hist(sub, bins=50, alpha=0.55, label=station, color=PALETTE.get(station))
-        ax4.axvline(75, color="orange", linestyle="--", linewidth=1, label="Batas Sehat")
-        ax4.set_xlabel("PM2.5 (µg/m³)")
-        ax4.set_ylabel("Frekuensi")
-        ax4.set_title("Histogram PM2.5")
-        ax4.legend()
-        plt.tight_layout()
-        st.pyplot(fig4)
-        plt.close()
-
+        fig4 = go.Figure()
+        for s in sel_stations:
+            fig4.add_trace(go.Histogram(x=df[df["station"] == s]["PM2.5"], name=s, opacity=0.6, marker_color=PALETTE.get(s)))
+        fig4.update_layout(barmode="overlay", title="Distribusi PM2.5")
+        st.plotly_chart(fig4, use_container_width=True)
     with col_d:
-        st.markdown("**Box Plot PM2.5 per Stasiun**")
-        fig5, ax5 = plt.subplots(figsize=(6, 4))
-        box_data = [
-            df[df["station"] == s]["PM2.5"].dropna().values
-            for s in selected_stations
-        ]
-        bp = ax5.boxplot(box_data, labels=selected_stations, patch_artist=True)
-        for patch, station in zip(bp["boxes"], selected_stations):
-            patch.set_facecolor(PALETTE.get(station, "#888"))
-        ax5.axhline(75, color="orange", linestyle="--", linewidth=1, label="Batas Sehat")
-        ax5.set_ylabel("PM2.5 (µg/m³)")
-        ax5.set_title("Boxplot PM2.5")
-        ax5.legend()
-        plt.tight_layout()
-        st.pyplot(fig5)
-        plt.close()
-
-    st.markdown("**Korelasi Antar Variabel Meteorologi**")
-    corr_cols = ["PM2.5", "TEMP", "PRES", "DEWP", "WSPM"]
-    avail_cols = [c for c in corr_cols if c in df.columns]
-
-    corr_tab_cols = st.columns(len(selected_stations))
-    for i, station in enumerate(selected_stations):
-        with corr_tab_cols[i]:
-            st.caption(f"**{station}**")
-            corr_matrix = df[df["station"] == station][avail_cols].corr()
-            fig6, ax6 = plt.subplots(figsize=(5, 4))
-            sns.heatmap(
-                corr_matrix,
-                annot=True,
-                fmt=".2f",
-                cmap="coolwarm",
-                center=0,
-                ax=ax6,
-                linewidths=0.5,
-            )
-            ax6.set_title(f"Korelasi – {station}")
-            plt.tight_layout()
-            st.pyplot(fig6)
-            plt.close()
-
-    st.markdown("**Kecepatan Angin (WSPM) vs PM2.5**")
-    if "WSPM" in df.columns:
-        fig7, ax7 = plt.subplots(figsize=(10, 4))
-        for station in selected_stations:
-            sub = df[df["station"] == station].sample(min(3000, len(df)), random_state=42)
-            ax7.scatter(sub["WSPM"], sub["PM2.5"], alpha=0.25, s=8,
-                        color=PALETTE.get(station), label=station)
-        ax7.set_xlabel("Kecepatan Angin WSPM (m/s)")
-        ax7.set_ylabel("PM2.5 (µg/m³)")
-        ax7.set_title("Hubungan Angin vs PM2.5")
-        ax7.legend()
-        plt.tight_layout()
-        st.pyplot(fig7)
-        plt.close()
-
-    with st.expander("📌 Insight"):
-        st.markdown(
-            """
-- Terdapat **korelasi negatif** antara WSPM (kecepatan angin) dan PM2.5 – angin kencang membersihkan polutan.
-- Dongsi menunjukkan **resistensi lebih tinggi** sehingga butuh kecepatan angin lebih besar untuk efek yang sama.
-- Suhu (TEMP) berkorelasi negatif dengan PM2.5 – udara panas umumnya meningkatkan dispersi polutan.
-"""
-        )
+        fig5 = go.Figure()
+        for s in sel_stations:
+            fig5.add_trace(go.Box(y=df[df["station"] == s]["PM2.5"], name=s, marker_color=PALETTE.get(s)))
+        fig5.update_layout(title="Box Plot Sebaran PM2.5")
+        st.plotly_chart(fig5, use_container_width=True)
 
 with tab4:
-    st.subheader("Analisis RFM – Karakteristik Polusi")
-    st.caption(
-        "Recency · Frequency · Intensity – mengidentifikasi risiko aktif polusi di setiap wilayah"
-    )
+    st.subheader("Analisis RFM – Risiko Polusi")
+    threshold_rfm = st.slider("Ambang Polusi (µg/m³)", 25, 150, 75)
+    high_df = df[df["PM2.5"] > threshold_rfm]
+    
+    if not high_df.empty:
+        rfm = high_df.groupby("station").agg(
+            Last_High=("datetime", "max"),
+            Frequency=("datetime", "count"),
+            Intensity=("PM2.5", "mean")
+        ).reset_index()
+        rfm["Recency_Hours"] = ((df["datetime"].max() - rfm["Last_High"]).dt.total_seconds() / 3600).round(1)
 
-    THRESHOLD = st.slider("Ambang Polusi Tidak Sehat (PM2.5)", 25, 150, 75, step=5)
+        for col, inv in [("Recency_Hours", True), ("Frequency", False), ("Intensity", False)]:
+            mn, mx = rfm[col].min(), rfm[col].max()
+            if mx != mn:
+                rfm[f"{col[0]}_score"] = (rfm[col] - mn) / (mx - mn) * 100
+                if inv: rfm[f"{col[0]}_score"] = 100 - rfm[f"{col[0]}_score"]
+            else: rfm[f"{col[0]}_score"] = 50
 
-    high_df = df[df["PM2.5"] > THRESHOLD]
-
-    if high_df.empty:
-        st.warning("Tidak ada data yang melewati ambang batas ini.")
+        categories = ["R_score (Recency)", "F_score (Frequency)", "I_score (Intensity)"]
+        fig_radar = go.Figure()
+        for _, row in rfm.iterrows():
+            vals = [row["R_score"], row["F_score"], row["I_score"]]
+            fig_radar.add_trace(go.Scatterpolar(r=vals + [vals[0]], theta=categories + [categories[0]], fill="toself", name=row["station"], line_color=PALETTE.get(row["station"])))
+        st.plotly_chart(fig_radar, use_container_width=True)
     else:
-        rfm = (
-            high_df.groupby("station")
-            .agg(
-                Last_High_Pollution=("datetime", "max"),
-                Frequency=("datetime", "count"),
-                Intensity=("PM2.5", "mean"),
-            )
-            .reset_index()
-        )
-        recent_date = df["datetime"].max()
-        rfm["Recency_Hours"] = (
-            (recent_date - rfm["Last_High_Pollution"]).dt.total_seconds() / 3600
-        ).round(1)
-
-        display_rfm = rfm[["station", "Recency_Hours", "Frequency", "Intensity"]].rename(
-            columns={
-                "station": "Wilayah",
-                "Recency_Hours": "Recency (Jam sejak terakhir tidak sehat)",
-                "Frequency": "Frequency (Jumlah jam tidak sehat)",
-                "Intensity": "Intensity (Rata-rata PM2.5 saat tidak sehat µg/m³)",
-            }
-        )
-        st.dataframe(display_rfm.style.format({"Intensity (Rata-rata PM2.5 saat tidak sehat µg/m³)": "{:.1f}"}), use_container_width=True)
-
-        fig8, axes = plt.subplots(1, 3, figsize=(14, 4))
-        metrics = [
-            ("Frequency", "Frequency (Jam Tidak Sehat)", "skyblue"),
-            ("Intensity", "Intensity (Avg PM2.5 µg/m³)", "salmon"),
-            ("Recency_Hours", "Recency (Jam sejak terakhir)", "gold"),
-        ]
-        for ax, (col, label, color) in zip(axes, metrics):
-            bars = ax.bar(rfm["station"], rfm[col],
-                          color=[PALETTE.get(s, color) for s in rfm["station"]])
-            ax.set_title(label)
-            ax.set_ylabel(label)
-            for bar, val in zip(bars, rfm[col]):
-                ax.text(bar.get_x() + bar.get_width() / 2,
-                        bar.get_height() * 1.01,
-                        f"{val:,.0f}",
-                        ha="center", va="bottom", fontsize=9)
-        plt.tight_layout()
-        st.pyplot(fig8)
-        plt.close()
-
-    with st.expander("📌 Insight"):
-        st.markdown(
-            """
-- **Dongsi** memiliki *Frequency* jauh lebih tinggi – penduduk pusat kota lebih sering terpapar udara tidak sehat.
-- *Intensity* Dongsi juga lebih tinggi – saat polusi terjadi, kadarnya lebih pekat & berbahaya.
-- Nilai *Recency* rendah di kedua wilayah menandakan polusi masih menjadi **ancaman aktif**, bukan sekadar kejadian masa lalu.
-"""
-        )
+        st.warning("Tidak ada data polusi tinggi terdeteksi.")
 
 st.markdown("---")
-st.caption(
-    "📘 Proyek Analisis Data – Air Quality Dataset | "
-    "Henokh William Christianos Lase | henokhwcl | Dicoding Dev Academy"
-)
+st.caption("📘 Proyek Analisis Data | Henokh William Christianos Lase | Dicoding Dev Academy")
