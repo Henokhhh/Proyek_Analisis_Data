@@ -16,9 +16,16 @@ st.set_page_config(
 )
 
 PALETTE = {
-    "Dongsi": "#C0392B",   # merah
-    "Dingling": "#2E86C1", # biru
+    "Dongsi": "#C0392B",   
+    "Dingling": "#2E86C1", 
+    
 }
+
+STATION_COORDS = {
+    "Dongsi": {"lat": 39.929, "lon": 116.417},
+    "Dingling": {"lat": 40.285, "lon": 116.220}
+}
+
 HEALTHY_LINE_COLOR = "#E67E22"  
 HEALTHY_LINE_DASH  = "dash"
 
@@ -32,20 +39,36 @@ st.markdown(
     <style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap');
     html, body, [class*="css"] {{ font-family: 'IBM Plex Sans', sans-serif; }}
-    .legend-banner {{ display: flex; gap: 24px; align-items: center; background: #f0f4f8; border-radius: 8px; padding: 10px 18px; margin-bottom: 12px; font-size: 0.85rem; }}
-    .legend-dot {{ width: 14px; height: 14px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }}
-    .legend-line {{ width: 28px; height: 3px; display: inline-block; margin-right: 6px; vertical-align: middle; border-top: 2.5px dashed {HEALTHY_LINE_COLOR}; }}
-    .kpi-card {{ background: white; border-radius: 10px; padding: 14px 18px; border-left: 5px solid #ccc; box-shadow: 0 1px 4px rgba(0,0,0,.07); margin-bottom: 8px; }}
-    .kpi-card.dongsi  {{ border-left-color: {PALETTE["Dongsi"]}; }}
-    .kpi-card.dingling {{ border-left-color: {PALETTE["Dingling"]}; }}
-    .kpi-label {{ font-size: .75rem; color: #6b7280; margin-bottom: 2px; }}
-    .kpi-value {{ font-size: 1.5rem; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }}
-    .kpi-sub   {{ font-size: .75rem; color: #9ca3af; }}
-    .rfm-badge {{ display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; letter-spacing: .03em; }}
-    .rfm-high   {{ background:#fde8e8; color:#b91c1c; }}
-    .rfm-medium {{ background:#fef3c7; color:#b45309; }}
-    .rfm-low    {{ background:#d1fae5; color:#065f46; }}
-    h1 {{ color: #1e293b; }}
+    .kpi-card {{ 
+        background: #ffffff; /* Tetap putih agar kontras dengan border warna stasiun */
+        border-radius: 10px; 
+        padding: 14px 18px; 
+        border-left: 5px solid #ccc; 
+        box-shadow: 0 1px 4px rgba(0,0,0,.1); 
+        margin-bottom: 8px; 
+    }}
+
+    /* Perbaikan: Gunakan warna hitam pekat agar tetap terbaca meski di dark mode */
+    .kpi-label {{ 
+        font-size: .75rem; 
+        color: #1a1a1a !important; /* Warna gelap agar terlihat di bg putih */
+        margin-bottom: 2px; 
+        font-weight: 600;
+    }}
+
+    .kpi-value {{ 
+        font-size: 1.5rem; 
+        font-weight: 700; 
+        color: #000000 !important; /* Warna hitam solid */
+        font-family: 'IBM Plex Mono', monospace; 
+    }}
+
+    .kpi-sub {{ 
+        font-size: .75rem; 
+        color: #4b5563 !important; /* Abu-abu gelap */
+    }}
+    
+    /* ... sisa CSS lainnya ... */
     </style>
     """,
     unsafe_allow_html=True,
@@ -90,7 +113,7 @@ def load_data(filepath: str) -> pd.DataFrame:
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Flag_of_the_People%27s_Republic_of_China.svg/320px-Flag_of_the_People%27s_Republic_of_China.svg.png", width=80)
     st.title("⚙️ Pengaturan")
-    data_dir = st.text_input("Path File CSV", value="main_data.csv")
+    data_dir = "main_data.csv" 
     df_raw = load_data(data_dir)
 
     if df_raw.empty:
@@ -129,7 +152,7 @@ for i, station in enumerate(sel_stations):
                     f'<div class="kpi-sub">{len(subset):,} jam pengamatan</div></div>', unsafe_allow_html=True)
 
 st.markdown("---")
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Tren Bulanan", "🌸 Pola Musiman", "🔬 EDA & Korelasi", "📊 Analisis RFM"])
+tab1, tab2, tab3, tab4 = st.tabs(["📈 Tren Bulanan", "🌸 Pola Musiman", "🔬 EDA & Korelasi", "🌍 Analisis Geospasial"])
 
 with tab1:
     st.subheader("Tren Rata-rata PM2.5 Bulanan")
@@ -188,33 +211,40 @@ with tab3:
         st.plotly_chart(fig5, use_container_width=True)
 
 with tab4:
-    st.subheader("Analisis RFM – Risiko Polusi")
-    threshold_rfm = st.slider("Ambang Polusi (µg/m³)", 25, 150, 75)
-    high_df = df[df["PM2.5"] > threshold_rfm]
-    
-    if not high_df.empty:
-        rfm = high_df.groupby("station").agg(
-            Last_High=("datetime", "max"),
-            Frequency=("datetime", "count"),
-            Intensity=("PM2.5", "mean")
-        ).reset_index()
-        rfm["Recency_Hours"] = ((df["datetime"].max() - rfm["Last_High"]).dt.total_seconds() / 3600).round(1)
+    st.subheader("Peta Sebaran Konsentrasi PM2.5")
+    st.markdown("Visualisasi posisi geografis stasiun terhadap intensitas polusi rata-rata.")
 
-        for col, inv in [("Recency_Hours", True), ("Frequency", False), ("Intensity", False)]:
-            mn, mx = rfm[col].min(), rfm[col].max()
-            if mx != mn:
-                rfm[f"{col[0]}_score"] = (rfm[col] - mn) / (mx - mn) * 100
-                if inv: rfm[f"{col[0]}_score"] = 100 - rfm[f"{col[0]}_score"]
-            else: rfm[f"{col[0]}_score"] = 50
+    # Menyiapkan data geospasial
+    geo_df = df.groupby('station')['PM2.5'].mean().reset_index()
+    geo_df['lat'] = geo_df['station'].map(lambda x: STATION_COORDS.get(x, {}).get('lat'))
+    geo_df['lon'] = geo_df['station'].map(lambda x: STATION_COORDS.get(x, {}).get('lon'))
 
-        categories = ["R_score (Recency)", "F_score (Frequency)", "I_score (Intensity)"]
-        fig_radar = go.Figure()
-        for _, row in rfm.iterrows():
-            vals = [row["R_score"], row["F_score"], row["I_score"]]
-            fig_radar.add_trace(go.Scatterpolar(r=vals + [vals[0]], theta=categories + [categories[0]], fill="toself", name=row["station"], line_color=PALETTE.get(row["station"])))
-        st.plotly_chart(fig_radar, use_container_width=True)
-    else:
-        st.warning("Tidak ada data polusi tinggi terdeteksi.")
+    fig_map = px.scatter_mapbox(
+        geo_df,
+        lat="lat",
+        lon="lon",
+        color="station",
+        size="PM2.5",
+        color_discrete_map=PALETTE,
+        size_max=40,
+        zoom=9,
+        hover_name="station",
+        hover_data={"lat": False, "lon": False, "PM2.5": ":.2f"},
+        title="Distribusi Spasial PM2.5 di Beijing"
+    )
+
+    fig_map.update_layout(
+        mapbox_style="carto-positron", 
+        margin={"r":0,"t":40,"l":0,"b":0},
+        height=600,
+        autosize=True  
+    )
+
+    st.plotly_chart(
+        fig_map, 
+        use_container_width=True,
+        theme="streamlit"  
+    )
 
 st.markdown("---")
 st.caption("📘 Proyek Analisis Data | Henokh William Christianos Lase | Dicoding Dev Academy")
